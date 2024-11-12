@@ -1,10 +1,33 @@
 // https://www.youtube.com/watch?v=nH9E25nkk3I
 
 import express, { request, response } from "express";
+import { query, validationResult ,body } from "express-validator";
 
 const app = express();
 
 app.use(express.json());
+
+const loggingMiddleware = (request, response, next) => {
+    console.log(`${request.method} - ${request.url}`);
+    next();
+};
+
+const resolveIndexByUserId = (request, response, next) => {
+    const { 
+        body,
+        params: { id },
+    } = request;
+
+    const parsedId = parseInt(id);
+    if (isNaN(parsedId)) return response.sendStatus(400);
+
+    const findUserIndex = mockUsers.findIndex((user) => user.id === parsedId);
+
+    if (findUserIndex === -1) return response.sendStatus(404);
+    request.findUserIndex = findUserIndex;
+    next();
+};
+
 
 const PORT = process.env.PORT || 3000;
 
@@ -24,40 +47,75 @@ app.listen(PORT, ()=> {
 });                                            //arayuze yazdirdihan fonction
 
 
-app.get("/", (request, response) => {
+app.get("/",  (request, response) => {
     response.status(201).send({msg:"Hello"});
 });
 
-app.get("/api/users", (request, response) => {
-    console.log(request.query);
-    const { 
-        query : { filter, value },
+app.get(
+    "/api/users",
+     query("filter")
+        .isString()
+        .notEmpty()
+        .withMessage("Must not be empty")
+        .isLength({ min: 3,  max: 10 })
+        .withMessage("Must be at least 3-10 characters"),
+      (request, response) => {
+        const result = validationResult(request);
+        console.log(result);
+        const { 
+            query : { filter, value },
     } = request;
     
     /* if (!filter && !value) return response.send(mockUsers); //when filter and value are undefined    */
-    if (filter && value) 
-        return response.send(
-            mockUsers.filter((user) => user[filter].includes(value))
-        );
-    return response.send(mockUsers);
+        if (filter && value) 
+            return response.send(
+                mockUsers.filter((user) => user[filter].includes(value))
+            );
+        return response.send(mockUsers);
+    }
+);
+
+/*
+app.use(loggingMiddleware, (request, response, next) => {
+    console.log("Finished Logging...");
+    next();
 });
+*/
 
 //post
-app.post("/api/users", (request, response) => {  
-    console.log(request.body);
-    const { body } = request;
-    const newUser = { id: mockUsers[mockUsers.length -1].id + 1, ...body};
-    mockUsers.push(newUser);
-    return response.status(201).send(newUser);
-});
+app.post(
+    "/api/users",
+     [
+        body("username")
+        .notEmpty()
+        .withMessage("User name can not be empty")
+        .isLength({ min: 3,  max: 32 })
+        .withMessage(
+            "User name Must be at least 5-32 characters"
+        )
+        .isString()
+        .withMessage("Username must be a String"),
+      body("displayName").notEmpty(),
+     ],
+      (request, response) => {  
+        const result = validationResult(request);
+        console.log(result);
 
-app.get("/api/users/:id", (request, response) => {
-    console.log(request.params);
-    const parsedId = parseInt(request.params.id);
-    console.log(parsedId);
-    if (isNaN(parsedId))
-         return response.status(400).send({msg:"Bad Request . Invalid ID."});
-    const findUser = mockUsers.find((user) => user.id === parsedId);
+        if(!result.isEmpty())
+            return response.status(400).send({ errors: result.array() });
+
+
+        const { body } = request;
+        const newUser = { id: mockUsers[mockUsers.length -1].id + 1, ...body};
+        mockUsers.push(newUser);
+        return response.status(201).send(newUser);
+    
+    }
+);
+
+app.get("/api/users/:id", resolveIndexByUserId,(request, response) => {
+    const { findUserIndex } = request;
+    const findUser = mockUsers[findUserIndex];
     if (!findUser) return response.sendStatus(404); //eger user id yi bulamazssa
     return response.send(findUser);
 
@@ -69,52 +127,27 @@ app.get("/api/products", (request, response) => {
 
 
 //PUT - apdete
-app.put("/api/users/:id", (request, response) => {
-    const { 
-        body,
-        params: { id },
-    } = request;
+app.put("/api/users/:id", resolveIndexByUserId,(request, response) => {
+    const { body, findUserIndex} = request;
 
-    const parsedId = parseInt(id);
-    if (isNaN(parsedId)) return response.sendStatus(400);
-
-    const findUserIndex = mockUsers.findIndex((user) => user.id === parsedId);
-
-    if (findUserIndex === -1) return response.sendStatus(404);
-    mockUsers[findUserIndex] = { id: parsedId, ...body};
+    mockUsers[findUserIndex] = { id: mockUsers[findUserIndex].id, ...body};
     return response.sendStatus(200);
 
 });
 
 
 //PATCH --sadece sectimiz elimnti degistiryorv--1:19:30
-app.patch("/api/users/:id", (request, response) => {
-    const { 
-        body,
-        params: { id },
-    } = request;
+app.patch("/api/users/:id", resolveIndexByUserId,(request, response) => {
+    const { body, findUserIndex } = request;
 
-    const parsedId = parseInt(id);
-    if (isNaN(parsedId)) return response.sendStatus(400);
-
-    const findUserIndex = mockUsers.findIndex((user) => user.id === parsedId);
-    if (findUserIndex === -1) return response.sendStatus(404); //user not found
     mockUsers[findUserIndex] = {...mockUsers[findUserIndex], ...body};
     return response.sendStatus(200);
 
 });
 
 //DELETE
-app.delete("/api/users/:id", (request, response) => {
-    const { 
-        params: { id },
-    } = request;
-
-    const parsedId = parseInt(id);
-
-    if (isNaN(parsedId)) return response.sendStatus(400);
-    const findUserIndex = mockUsers.findIndex((user) => user.id === parsedId);
-    if (findUserIndex === -1) return response.sendStatus(404);
+app.delete("/api/users/:id", resolveIndexByUserId,(request, response) => {
+    const { findUserIndex} = request;
     mockUsers.splice(findUserIndex, 1);
     return response.sendStatus(200);
 });
